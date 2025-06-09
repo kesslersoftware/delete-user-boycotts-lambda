@@ -83,6 +83,7 @@
     </repository>
   </repositories>
   <build>
+    <finalName>${artifactId}</finalName>
     <plugins>
       <!-- Maven Shade Plugin to create a Lambda-deployable fat jar -->
       <plugin>

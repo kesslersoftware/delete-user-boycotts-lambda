@@ -31,7 +31,9 @@ public class DeleteUserBoycottsHandler implements RequestHandler<Map<String, Obj
     @Override
     public APIGatewayProxyResponseEvent handleRequest(Map<String, Object> input, Context context) {
         try {
-            return null;
+            return new APIGatewayProxyResponseEvent()
+                    .withStatusCode(200)
+                    .withBody("{\"success\"}");
         } catch (Exception e) {
             return new APIGatewayProxyResponseEvent()
                     .withStatusCode(500)
