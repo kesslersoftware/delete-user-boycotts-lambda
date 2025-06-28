@@ -5,6 +5,7 @@ import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
 
+import com.boycottpro.models.ResponseMessage;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
@@ -34,31 +35,58 @@ public class DeleteUserBoycottsHandler implements RequestHandler<APIGatewayProxy
             String userId = (pathParams != null) ? pathParams.get("user_id") : null;
             String companyId = (pathParams != null) ? pathParams.get("company_id") : null;
             if (userId == null || userId.isEmpty()) {
+                ResponseMessage message = new ResponseMessage(400,
+                        "sorry, there was an error processing your request",
+                        "user_id not present");
+                String responseBody = objectMapper.writeValueAsString(message);
                 return new APIGatewayProxyResponseEvent()
                         .withStatusCode(400)
-                        .withBody("{\"error\":\"Missing user_id in path\"}");
+                        .withHeaders(Map.of("Content-Type", "application/json"))
+                        .withBody(responseBody);
             }
             if (companyId == null || companyId.isEmpty()) {
+                ResponseMessage message = new ResponseMessage(400,
+                        "sorry, there was an error processing your request",
+                        "company_id not present");
+                String responseBody = objectMapper.writeValueAsString(message);
                 return new APIGatewayProxyResponseEvent()
                         .withStatusCode(400)
-                        .withBody("{\"error\":\"Missing company_id in path\"}");
+                        .withHeaders(Map.of("Content-Type", "application/json"))
+                        .withBody(responseBody);
             }
-            boolean deleted = deleteUserBoycotts(userId, companyId);
-            if (deleted) {
+            List<String> causeIds = deleteUserBoycotts(userId, companyId);
+            if (causeIds.size()>0) {
                 decrementCompanyBoycottCount(companyId);
+                decrementCauseCompanyStatsRecords(companyId,causeIds);
             }
-            String responseBody = objectMapper.writeValueAsString("user_boycotts record delete = " + deleted);
+            ResponseMessage message = new ResponseMessage(200,
+                    "boycott removed successfully",
+                    "user_boycotts record deleted along with all records from other tables");
+            String responseBody = objectMapper.writeValueAsString(message);
             return new APIGatewayProxyResponseEvent()
                     .withStatusCode(200)
                     .withHeaders(Map.of("Content-Type", "application/json"))
                     .withBody(responseBody);
         } catch (Exception e) {
+            e.printStackTrace();
+            ResponseMessage message = new ResponseMessage(500,
+                    "sorry, there was an error processing your request",
+                    "Unexpected server error: " + e.getMessage());
+            String responseBody = null;
+            try {
+                responseBody = objectMapper.writeValueAsString(message);
+            } catch (JsonProcessingException ex) {
+                System.out.println("json processing exception");
+                ex.printStackTrace();
+                throw new RuntimeException(ex);
+            }
             return new APIGatewayProxyResponseEvent()
                     .withStatusCode(500)
-                    .withBody("{\"error\": \"Unexpected server error: " + e.getMessage() + "\"}");
+                    .withHeaders(Map.of("Content-Type", "application/json"))
+                    .withBody(responseBody);
         }
     }
-    private boolean deleteUserBoycotts(String userId, String companyId) {
+    private List<String> deleteUserBoycotts(String userId, String companyId) {
         try {
             QueryRequest queryRequest = QueryRequest.builder()
                     .tableName("user_boycotts")
@@ -71,11 +99,15 @@ public class DeleteUserBoycottsHandler implements RequestHandler<APIGatewayProxy
             QueryResponse queryResponse = dynamoDb.query(queryRequest);
 
             List<WriteRequest> deleteRequests = new ArrayList<>();
-
+            List<String> causeIds = new ArrayList<>();
             for (Map<String, AttributeValue> item : queryResponse.items()) {
                 if (!item.containsKey("company_id")) continue;
                 if (!item.get("company_id").s().equals(companyId)) continue;
-
+                String causeId = item.get("company_cause_id").s();
+                if(causeId.isEmpty()||causeId.isBlank()) {
+                    causeId = "personal";
+                }
+                causeIds.add(causeId);
                 Map<String, AttributeValue> key = new HashMap<>();
                 key.put("user_id", item.get("user_id"));
 
@@ -92,7 +124,7 @@ public class DeleteUserBoycottsHandler implements RequestHandler<APIGatewayProxy
             }
 
             if (deleteRequests.isEmpty()) {
-                return true;
+                return new ArrayList();
             }
 
             // Batch delete (25 max per call)
@@ -104,11 +136,11 @@ public class DeleteUserBoycottsHandler implements RequestHandler<APIGatewayProxy
                 dynamoDb.batchWriteItem(batchRequest);
             }
 
-            return true;
+            return causeIds;
 
         } catch (Exception e) {
             e.printStackTrace();
-            return false;
+            return new ArrayList();
         }
     }
     private void decrementCompanyBoycottCount(String companyId) {
@@ -126,5 +158,36 @@ public class DeleteUserBoycottsHandler implements RequestHandler<APIGatewayProxy
 
         dynamoDb.updateItem(updateRequest);
     }
+    public void decrementCauseCompanyStatsRecords(String companyId, List<String> causeIds) {
+        for (String causeId : causeIds) {
+            if(!causeId.equals("personal")) {
+                Map<String, AttributeValue> key = new HashMap<>();
+                key.put("company_id", AttributeValue.fromS(companyId));
+                key.put("cause_id", AttributeValue.fromS(causeId));
+
+                // Use ADD to decrement the counter atomically
+                Map<String, AttributeValueUpdate> attributeUpdates = new HashMap<>();
+                attributeUpdates.put("boycott_count", AttributeValueUpdate.builder()
+                        .value(AttributeValue.fromN("-1"))
+                        .action(AttributeAction.ADD)
+                        .build());
+
+                UpdateItemRequest updateRequest = UpdateItemRequest.builder()
+                        .tableName("cause_company_stats")
+                        .key(key)
+                        .attributeUpdates(attributeUpdates)
+                        .build();
+
+                try {
+                    dynamoDb.updateItem(updateRequest);
+                } catch (Exception e) {
+                    System.err.println("Failed to decrement boycott_count for company_id=" + companyId +
+                            ", cause_id=" + causeId);
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
 
 }

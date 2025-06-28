@@ -3,6 +3,8 @@ package com.boycottpro.userboycotts;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
+import com.boycottpro.models.ResponseMessage;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -25,6 +27,8 @@ class DeleteUserBoycottsHandlerTest {
 
     @InjectMocks
     private DeleteUserBoycottsHandler handler;
+
+    private ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
     void testSuccessfulDeleteFlow() throws Exception {
@@ -60,11 +64,12 @@ class DeleteUserBoycottsHandlerTest {
         APIGatewayProxyResponseEvent response = handler.handleRequest(event, mock(Context.class));
 
         assertEquals(200, response.getStatusCode());
-        assertTrue(response.getBody().contains("user_boycotts record delete = true"));
+        ResponseMessage message = objectMapper.readValue(response.getBody(), ResponseMessage.class);
+        assertTrue(message.getMessage().contains("boycott removed successfully"));
 
         // Verify interactions
         verify(dynamoDb, times(1)).query(any(QueryRequest.class));
         verify(dynamoDb, times(1)).batchWriteItem(any(BatchWriteItemRequest.class));
-        verify(dynamoDb, times(1)).updateItem(any(UpdateItemRequest.class));
+        verify(dynamoDb, times(2)).updateItem(any(UpdateItemRequest.class));
     }
 }
