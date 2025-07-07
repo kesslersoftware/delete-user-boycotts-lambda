@@ -103,11 +103,11 @@ public class DeleteUserBoycottsHandler implements RequestHandler<APIGatewayProxy
             for (Map<String, AttributeValue> item : queryResponse.items()) {
                 if (!item.containsKey("company_id")) continue;
                 if (!item.get("company_id").s().equals(companyId)) continue;
-                String causeId = item.get("cause_id").s();
-                if(causeId.isEmpty()||causeId.isBlank()) {
-                    causeId = "personal";
+                String causeId = null;
+                if(item.get("cause_id") != null) {
+                    causeId = item.get("cause_id").s();
+                    causeIds.add(causeId);
                 }
-                causeIds.add(causeId);
                 Map<String, AttributeValue> key = new HashMap<>();
                 key.put("user_id", item.get("user_id"));
 
@@ -160,7 +160,6 @@ public class DeleteUserBoycottsHandler implements RequestHandler<APIGatewayProxy
     }
     public void decrementCauseCompanyStatsRecords(String companyId, List<String> causeIds) {
         for (String causeId : causeIds) {
-            if(!causeId.equals("personal")) {
                 Map<String, AttributeValue> key = new HashMap<>();
                 key.put("company_id", AttributeValue.fromS(companyId));
                 key.put("cause_id", AttributeValue.fromS(causeId));
@@ -185,7 +184,6 @@ public class DeleteUserBoycottsHandler implements RequestHandler<APIGatewayProxy
                             ", cause_id=" + causeId);
                     e.printStackTrace();
                 }
-            }
         }
     }
 
