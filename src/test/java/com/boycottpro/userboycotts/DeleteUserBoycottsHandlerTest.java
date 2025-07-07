@@ -40,7 +40,8 @@ class DeleteUserBoycottsHandlerTest {
                 "user_id", AttributeValue.fromS(testUserId),
                 "company_id", AttributeValue.fromS(testCompanyId),
                 "company_name", AttributeValue.fromS("Test Company"),
-                "company_cause_id", AttributeValue.fromS("com#cause")
+                "company_cause_id", AttributeValue.fromS("com#cause"),
+                "cause_id", AttributeValue.fromS("cause")
         );
         QueryResponse mockQueryResponse = QueryResponse.builder()
                 .items(List.of(mockItem))

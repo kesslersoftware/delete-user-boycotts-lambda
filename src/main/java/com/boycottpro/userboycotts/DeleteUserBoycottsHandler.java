@@ -103,7 +103,7 @@ public class DeleteUserBoycottsHandler implements RequestHandler<APIGatewayProxy
             for (Map<String, AttributeValue> item : queryResponse.items()) {
                 if (!item.containsKey("company_id")) continue;
                 if (!item.get("company_id").s().equals(companyId)) continue;
-                String causeId = item.get("company_cause_id").s();
+                String causeId = item.get("cause_id").s();
                 if(causeId.isEmpty()||causeId.isBlank()) {
                     causeId = "personal";
                 }
