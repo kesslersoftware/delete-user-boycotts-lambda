@@ -13,6 +13,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.*;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -59,7 +60,14 @@ class DeleteUserBoycottsHandlerTest {
 
         // Build request
         APIGatewayProxyRequestEvent event = new APIGatewayProxyRequestEvent();
-        event.setPathParameters(Map.of("user_id", testUserId, "company_id", testCompanyId));
+        Map<String, String> claims = Map.of("sub", "11111111-2222-3333-4444-555555555555");
+        Map<String, Object> authorizer = new HashMap<>();
+        authorizer.put("claims", claims);
+
+        APIGatewayProxyRequestEvent.ProxyRequestContext rc = new APIGatewayProxyRequestEvent.ProxyRequestContext();
+        rc.setAuthorizer(authorizer);
+        event.setRequestContext(rc);
+        event.setPathParameters(Map.of( "company_id", testCompanyId));
 
         // Invoke handler
         APIGatewayProxyResponseEvent response = handler.handleRequest(event, mock(Context.class));

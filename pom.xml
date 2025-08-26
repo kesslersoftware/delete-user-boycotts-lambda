@@ -68,7 +68,7 @@
     <dependency>
       <groupId>com.boycottpro</groupId>
       <artifactId>boycottpro-common-models</artifactId>
-      <version>1.0.10</version>
+      <version>1.0.12</version>
     </dependency>
   </dependencies>
   <repositories>

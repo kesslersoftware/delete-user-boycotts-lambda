@@ -6,6 +6,7 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
 
 import com.boycottpro.models.ResponseMessage;
+import com.boycottpro.utilities.JwtUtility;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
@@ -31,30 +32,18 @@ public class DeleteUserBoycottsHandler implements RequestHandler<APIGatewayProxy
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent event, Context context) {
         try {
+            String sub = JwtUtility.getSubFromRestEvent(event);
+            if (sub == null) return response(401, "Unauthorized");
             Map<String, String> pathParams = event.getPathParameters();
-            String userId = (pathParams != null) ? pathParams.get("user_id") : null;
             String companyId = (pathParams != null) ? pathParams.get("company_id") : null;
-            if (userId == null || userId.isEmpty()) {
-                ResponseMessage message = new ResponseMessage(400,
-                        "sorry, there was an error processing your request",
-                        "user_id not present");
-                String responseBody = objectMapper.writeValueAsString(message);
-                return new APIGatewayProxyResponseEvent()
-                        .withStatusCode(400)
-                        .withHeaders(Map.of("Content-Type", "application/json"))
-                        .withBody(responseBody);
-            }
             if (companyId == null || companyId.isEmpty()) {
                 ResponseMessage message = new ResponseMessage(400,
                         "sorry, there was an error processing your request",
                         "company_id not present");
                 String responseBody = objectMapper.writeValueAsString(message);
-                return new APIGatewayProxyResponseEvent()
-                        .withStatusCode(400)
-                        .withHeaders(Map.of("Content-Type", "application/json"))
-                        .withBody(responseBody);
+                return response(400,responseBody);
             }
-            List<String> causeIds = deleteUserBoycotts(userId, companyId);
+            List<String> causeIds = deleteUserBoycotts(sub, companyId);
             if (causeIds.size()>0) {
                 decrementCompanyBoycottCount(companyId);
                 decrementCauseCompanyStatsRecords(companyId,causeIds);
@@ -63,10 +52,7 @@ public class DeleteUserBoycottsHandler implements RequestHandler<APIGatewayProxy
                     "boycott removed successfully",
                     "user_boycotts record deleted along with all records from other tables");
             String responseBody = objectMapper.writeValueAsString(message);
-            return new APIGatewayProxyResponseEvent()
-                    .withStatusCode(200)
-                    .withHeaders(Map.of("Content-Type", "application/json"))
-                    .withBody(responseBody);
+            return response(200,responseBody);
         } catch (Exception e) {
             e.printStackTrace();
             ResponseMessage message = new ResponseMessage(500,
@@ -80,11 +66,14 @@ public class DeleteUserBoycottsHandler implements RequestHandler<APIGatewayProxy
                 ex.printStackTrace();
                 throw new RuntimeException(ex);
             }
-            return new APIGatewayProxyResponseEvent()
-                    .withStatusCode(500)
-                    .withHeaders(Map.of("Content-Type", "application/json"))
-                    .withBody(responseBody);
+            return response(500,responseBody);
         }
+    }
+    private APIGatewayProxyResponseEvent response(int status, String body) {
+        return new APIGatewayProxyResponseEvent()
+                .withStatusCode(status)
+                .withHeaders(Map.of("Content-Type", "application/json"))
+                .withBody(body);
     }
     private List<String> deleteUserBoycotts(String userId, String companyId) {
         try {
@@ -143,6 +132,7 @@ public class DeleteUserBoycottsHandler implements RequestHandler<APIGatewayProxy
             return new ArrayList();
         }
     }
+
     private void decrementCompanyBoycottCount(String companyId) {
         UpdateItemRequest updateRequest = UpdateItemRequest.builder()
                 .tableName("companies")
