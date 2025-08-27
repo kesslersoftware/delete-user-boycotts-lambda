@@ -31,17 +31,17 @@ public class DeleteUserBoycottsHandler implements RequestHandler<APIGatewayProxy
 
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent event, Context context) {
+        String sub = null;
         try {
-            String sub = JwtUtility.getSubFromRestEvent(event);
-            if (sub == null) return response(401, "Unauthorized");
+            sub = JwtUtility.getSubFromRestEvent(event);
+            if (sub == null) return response(401, Map.of("message", "Unauthorized"));
             Map<String, String> pathParams = event.getPathParameters();
             String companyId = (pathParams != null) ? pathParams.get("company_id") : null;
             if (companyId == null || companyId.isEmpty()) {
                 ResponseMessage message = new ResponseMessage(400,
                         "sorry, there was an error processing your request",
                         "company_id not present");
-                String responseBody = objectMapper.writeValueAsString(message);
-                return response(400,responseBody);
+                return response(400,message);
             }
             List<String> causeIds = deleteUserBoycotts(sub, companyId);
             if (causeIds.size()>0) {
@@ -51,29 +51,23 @@ public class DeleteUserBoycottsHandler implements RequestHandler<APIGatewayProxy
             ResponseMessage message = new ResponseMessage(200,
                     "boycott removed successfully",
                     "user_boycotts record deleted along with all records from other tables");
-            String responseBody = objectMapper.writeValueAsString(message);
-            return response(200,responseBody);
+            return response(200,message);
         } catch (Exception e) {
-            e.printStackTrace();
-            ResponseMessage message = new ResponseMessage(500,
-                    "sorry, there was an error processing your request",
-                    "Unexpected server error: " + e.getMessage());
-            String responseBody = null;
-            try {
-                responseBody = objectMapper.writeValueAsString(message);
-            } catch (JsonProcessingException ex) {
-                System.out.println("json processing exception");
-                ex.printStackTrace();
-                throw new RuntimeException(ex);
-            }
-            return response(500,responseBody);
+            System.out.println(e.getMessage() + " for user " + sub);
+            return response(500,Map.of("error", "Unexpected server error: " + e.getMessage()) );
         }
     }
-    private APIGatewayProxyResponseEvent response(int status, String body) {
+    private APIGatewayProxyResponseEvent response(int status, Object body) {
+        String responseBody = null;
+        try {
+            responseBody = objectMapper.writeValueAsString(body);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
         return new APIGatewayProxyResponseEvent()
                 .withStatusCode(status)
                 .withHeaders(Map.of("Content-Type", "application/json"))
-                .withBody(body);
+                .withBody(responseBody);
     }
     private List<String> deleteUserBoycotts(String userId, String companyId) {
         try {
