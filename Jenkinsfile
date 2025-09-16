@@ -39,10 +39,30 @@ pipeline {
                 expression { !params.SKIP_TESTS }
             }
             steps {
+                script {
+                    // Create custom Maven settings to override HTTP blocker
+                    writeFile file: 'custom-settings.xml', text: '''<?xml version="1.0" encoding="UTF-8"?>
+<settings>
+  <mirrors>
+    <mirror>
+      <id>nexus-all</id>
+      <mirrorOf>*</mirrorOf>
+      <url>http://host.docker.internal:8096/repository/maven-public/</url>
+    </mirror>
+  </mirrors>
+  <servers>
+    <server>
+      <id>nexus-all</id>
+      <username>admin</username>
+      <password>admin123</password>
+    </server>
+  </servers>
+</settings>'''
+                }
                 sh '''
                     export JAVA_HOME="${TOOL_JDK_21}"
                     export PATH="$JAVA_HOME/bin:$PATH"
-                    mvn clean test
+                    mvn clean test -s custom-settings.xml
                 '''
             }
             post {
@@ -80,6 +100,24 @@ pipeline {
             steps {
                 script {
                     try {
+                        // Create custom Maven settings for SonarQube stage
+                        writeFile file: 'custom-settings.xml', text: '''<?xml version="1.0" encoding="UTF-8"?>
+<settings>
+  <mirrors>
+    <mirror>
+      <id>nexus-all</id>
+      <mirrorOf>*</mirrorOf>
+      <url>http://host.docker.internal:8096/repository/maven-public/</url>
+    </mirror>
+  </mirrors>
+  <servers>
+    <server>
+      <id>nexus-all</id>
+      <username>admin</username>
+      <password>admin123</password>
+    </server>
+  </servers>
+</settings>'''
                         withSonarQubeEnv('Local-SonarQube') {
                             sh '''
                                 export JAVA_HOME="${TOOL_JDK_21}"
@@ -87,7 +125,8 @@ pipeline {
                                 mvn sonar:sonar \
                                     -Dsonar.projectKey=${LAMBDA_NAME} \
                                     -Dsonar.projectName="${LAMBDA_NAME}" \
-                                    -Dsonar.projectVersion=${GIT_COMMIT_SHORT}
+                                    -Dsonar.projectVersion=${GIT_COMMIT_SHORT} \
+                                    -s custom-settings.xml
                             '''
                         }
                         echo "✅ SonarQube analysis completed successfully"
@@ -126,10 +165,30 @@ pipeline {
         
         stage('Build Lambda Package') {
             steps {
+                script {
+                    // Create custom Maven settings for this stage too
+                    writeFile file: 'custom-settings.xml', text: '''<?xml version="1.0" encoding="UTF-8"?>
+<settings>
+  <mirrors>
+    <mirror>
+      <id>nexus-all</id>
+      <mirrorOf>*</mirrorOf>
+      <url>http://host.docker.internal:8096/repository/maven-public/</url>
+    </mirror>
+  </mirrors>
+  <servers>
+    <server>
+      <id>nexus-all</id>
+      <username>admin</username>
+      <password>admin123</password>
+    </server>
+  </servers>
+</settings>'''
+                }
                 sh '''
                     export JAVA_HOME="${TOOL_JDK_21}"
                     export PATH="$JAVA_HOME/bin:$PATH"
-                    mvn clean package shade:shade -DskipTests
+                    mvn clean package shade:shade -DskipTests -s custom-settings.xml
 
                     # Verify the shaded JAR was created (this is the deployable Lambda JAR)
                     if [ ! -f target/${LAMBDA_NAME}.jar ]; then
