@@ -30,6 +30,19 @@ pipeline {
                         script: "git rev-parse --short HEAD",
                         returnStdout: true
                     ).trim()
+
+                    env.BUILD_TIMESTAMP = sh(
+                        script: 'date +"%Y%m%d-%H%M%S"',
+                        returnStdout: true
+                    ).trim()
+
+                    env.ARTIFACT_VERSION = "${env.GIT_COMMIT_SHORT}-${env.BUILD_NUMBER}-${env.BUILD_TIMESTAMP}"
+
+                    echo "📝 Version components:"
+                    echo "   Git commit: ${env.GIT_COMMIT_SHORT}"
+                    echo "   Build number: ${env.BUILD_NUMBER}"
+                    echo "   Timestamp: ${env.BUILD_TIMESTAMP}"
+                    echo "   Full version: ${env.ARTIFACT_VERSION}"
                 }
             }
         }
@@ -39,30 +52,10 @@ pipeline {
                 expression { !params.SKIP_TESTS }
             }
             steps {
-                script {
-                    // Create custom Maven settings to override HTTP blocker
-                    writeFile file: 'custom-settings.xml', text: '''<?xml version="1.0" encoding="UTF-8"?>
-<settings>
-  <mirrors>
-    <mirror>
-      <id>nexus-all</id>
-      <mirrorOf>*</mirrorOf>
-      <url>http://host.docker.internal:8096/repository/maven-public/</url>
-    </mirror>
-  </mirrors>
-  <servers>
-    <server>
-      <id>nexus-all</id>
-      <username>admin</username>
-      <password>admin123</password>
-    </server>
-  </servers>
-</settings>'''
-                }
                 sh '''
                     export JAVA_HOME="${TOOL_JDK_21}"
                     export PATH="$JAVA_HOME/bin:$PATH"
-                    mvn clean test -s custom-settings.xml
+                    mvn clean test
                 '''
             }
             post {
@@ -100,24 +93,6 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Create custom Maven settings for SonarQube stage
-                        writeFile file: 'custom-settings.xml', text: '''<?xml version="1.0" encoding="UTF-8"?>
-<settings>
-  <mirrors>
-    <mirror>
-      <id>nexus-all</id>
-      <mirrorOf>*</mirrorOf>
-      <url>http://host.docker.internal:8096/repository/maven-public/</url>
-    </mirror>
-  </mirrors>
-  <servers>
-    <server>
-      <id>nexus-all</id>
-      <username>admin</username>
-      <password>admin123</password>
-    </server>
-  </servers>
-</settings>'''
                         withSonarQubeEnv('Local-SonarQube') {
                             sh '''
                                 export JAVA_HOME="${TOOL_JDK_21}"
@@ -125,8 +100,7 @@ pipeline {
                                 mvn sonar:sonar \
                                     -Dsonar.projectKey=${LAMBDA_NAME} \
                                     -Dsonar.projectName="${LAMBDA_NAME}" \
-                                    -Dsonar.projectVersion=${GIT_COMMIT_SHORT} \
-                                    -s custom-settings.xml
+                                    -Dsonar.projectVersion=${GIT_COMMIT_SHORT}
                             '''
                         }
                         echo "✅ SonarQube analysis completed successfully"
@@ -166,7 +140,7 @@ pipeline {
         stage('Build Lambda Package') {
             steps {
                 script {
-                    // Create custom Maven settings for this stage too
+                    // Create custom Maven settings to override HTTP blocker
                     writeFile file: 'custom-settings.xml', text: '''<?xml version="1.0" encoding="UTF-8"?>
 <settings>
   <mirrors>
@@ -179,6 +153,11 @@ pipeline {
   <servers>
     <server>
       <id>nexus-all</id>
+      <username>admin</username>
+      <password>admin123</password>
+    </server>
+    <server>
+      <id>lambda-artifacts-${ENV}</id>
       <username>admin</username>
       <password>admin123</password>
     </server>
@@ -199,12 +178,59 @@ pipeline {
 
                     # Create deployment package with the shaded JAR
                     mkdir -p deployment
-                    cp target/${LAMBDA_NAME}.jar deployment/${LAMBDA_NAME}-${GIT_COMMIT_SHORT}.jar
+                    cp target/${LAMBDA_NAME}.jar deployment/${LAMBDA_NAME}-${ARTIFACT_VERSION}.jar
 
-                    echo "✅ Lambda JAR packaged: deployment/${LAMBDA_NAME}-${GIT_COMMIT_SHORT}.jar"
+                    echo "✅ Lambda JAR packaged: deployment/${LAMBDA_NAME}-${ARTIFACT_VERSION}.jar"
                 '''
-                
+
                 archiveArtifacts artifacts: 'deployment/*.jar', fingerprint: true
+                echo "📦 Archived: ${LAMBDA_NAME}-${ARTIFACT_VERSION}.jar"
+            }
+        }
+
+        stage('Publish to Nexus') {
+            steps {
+                script {
+                    echo "📦 Publishing Lambda JAR to Nexus with dual versioning strategy..."
+
+                    sh '''
+                        export JAVA_HOME="${TOOL_JDK_21}"
+                        export PATH="$JAVA_HOME/bin:$PATH"
+
+                        # 1. Deploy with traceability version (e.g., a1b2c3d-123-20250917-143022)
+                        mvn deploy:deploy-file \
+                            -Dfile=deployment/${LAMBDA_NAME}-${ARTIFACT_VERSION}.jar \
+                            -DgroupId=com.boycottpro.lambda \
+                            -DartifactId=${LAMBDA_NAME} \
+                            -Dversion=${ARTIFACT_VERSION} \
+                            -Dpackaging=jar \
+                            -DrepositoryId=lambda-artifacts-${ENV} \
+                            -Durl=http://host.docker.internal:8096/repository/lambda-artifacts-${ENV}/ \
+                            -s custom-settings.xml
+
+                        echo "✅ Published ${LAMBDA_NAME}:${ARTIFACT_VERSION} to Nexus"
+
+                        # 2. Deploy with LATEST alias (overwrite previous LATEST)
+                        mvn deploy:deploy-file \
+                            -Dfile=deployment/${LAMBDA_NAME}-${ARTIFACT_VERSION}.jar \
+                            -DgroupId=com.boycottpro.lambda \
+                            -DartifactId=${LAMBDA_NAME} \
+                            -Dversion=LATEST \
+                            -Dpackaging=jar \
+                            -DrepositoryId=lambda-artifacts-${ENV} \
+                            -Durl=http://host.docker.internal:8096/repository/lambda-artifacts-${ENV}/ \
+                            -s custom-settings.xml
+
+                        echo "✅ Published ${LAMBDA_NAME}:LATEST alias to Nexus"
+
+                        echo "🎯 Dual versioning strategy complete:"
+                        echo "   Traceability: ${LAMBDA_NAME}:${ARTIFACT_VERSION}"
+                        echo "   Alias: ${LAMBDA_NAME}:LATEST"
+                        echo "🔗 View at: http://localhost:8096/#browse/browse:lambda-artifacts-${ENV}"
+                        echo "📍 Repository: lambda-artifacts-${ENV}"
+                        echo "🔗 URL: http://localhost:8096/repository/lambda-artifacts-${ENV}/"
+                    '''
+                }
             }
         }
         
@@ -214,13 +240,15 @@ pipeline {
                     // Verify the deployment package is valid
                     sh '''
                         echo "✅ Lambda package verification"
-                        echo "   JAR file: deployment/${LAMBDA_NAME}-${GIT_COMMIT_SHORT}.jar"
+                        echo "   JAR file: deployment/${LAMBDA_NAME}-${ARTIFACT_VERSION}.jar"
+                        echo "   Version: ${ARTIFACT_VERSION}"
                         ls -la deployment/
 
                         # Basic JAR validation
-                        if [ -f deployment/${LAMBDA_NAME}-${GIT_COMMIT_SHORT}.jar ]; then
+                        if [ -f deployment/${LAMBDA_NAME}-${ARTIFACT_VERSION}.jar ]; then
                             echo "✅ Lambda JAR package created successfully"
-                            echo "   Ready for manual deployment to AWS Lambda"
+                            echo "   🎯 Unique version ensures no Nexus overwrites"
+                            echo "   📦 Ready for deployment to AWS Lambda"
                         else
                             echo "❌ Lambda JAR package not found"
                             exit 1
@@ -237,7 +265,9 @@ pipeline {
         }
         success {
             echo "✅ Lambda build completed successfully"
-            echo "📦 JAR package ready for manual deployment: deployment/${LAMBDA_NAME}-${env.GIT_COMMIT_SHORT}.jar"
+            echo "📦 JAR package: ${LAMBDA_NAME}-${env.ARTIFACT_VERSION}.jar"
+            echo "🏷️  Version format: git-commit + build-number + timestamp"
+            echo "🔗 Nexus: http://localhost:8096/#browse/browse:lambda-artifacts-${ENV}"
         }
         failure {
             emailext (
