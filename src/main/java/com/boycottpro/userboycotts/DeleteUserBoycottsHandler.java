@@ -7,6 +7,7 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent
 
 import com.boycottpro.models.ResponseMessage;
 import com.boycottpro.utilities.JwtUtility;
+import com.boycottpro.utilities.Logger;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
@@ -32,28 +33,39 @@ public class DeleteUserBoycottsHandler implements RequestHandler<APIGatewayProxy
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent event, Context context) {
         String sub = null;
+        int lineNum = 36;
         try {
             sub = JwtUtility.getSubFromRestEvent(event);
-            if (sub == null) return response(401, Map.of("message", "Unauthorized"));
+            if (sub == null) {
+            Logger.error(40, sub, "user is Unauthorized");
+            return response(401, Map.of("message", "Unauthorized"));
+            }
+            lineNum = 43;
             Map<String, String> pathParams = event.getPathParameters();
             String companyId = (pathParams != null) ? pathParams.get("company_id") : null;
             if (companyId == null || companyId.isEmpty()) {
+                Logger.error(47, sub, "company_id not present");
                 ResponseMessage message = new ResponseMessage(400,
                         "sorry, there was an error processing your request",
                         "company_id not present");
                 return response(400,message);
             }
+            lineNum = 53;
             List<String> causeIds = deleteUserBoycotts(sub, companyId);
+            lineNum = 55;
             if (causeIds.size()>0) {
+                lineNum = 57;
                 decrementCompanyBoycottCount(companyId);
+                lineNum = 59;
                 decrementCauseCompanyStatsRecords(companyId,causeIds);
             }
             ResponseMessage message = new ResponseMessage(200,
                     "boycott removed successfully",
                     "user_boycotts record deleted along with all records from other tables");
+            lineNum = 65;
             return response(200,message);
         } catch (Exception e) {
-            System.out.println(e.getMessage() + " for user " + sub);
+            Logger.error(lineNum, sub, e.getMessage());
             return response(500,Map.of("error", "Unexpected server error: " + e.getMessage()) );
         }
     }
